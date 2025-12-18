@@ -19,6 +19,13 @@ export function getEventStream(docker: Docker): EventEmitter {
 
     stream.on("data", (data) => {
       const event = data.value
+      if (
+        event.Type !== "container" ||
+        (event.Action !== "start" && event.Action !== "stop")
+      ) {
+        return
+      }
+
       emitter.emit(`${event.Type}.${event.Action}`, data.value)
     })
   })
