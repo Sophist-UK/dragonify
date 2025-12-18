@@ -7,7 +7,11 @@ import { parser } from "stream-json/jsonl/Parser"
 export function getEventStream(docker: Docker): EventEmitter {
   const emitter = new EventEmitter()
 
-  docker.getEvents((err, rawStream) => {
+  opts = {
+    type: "container",
+  }
+
+  docker.getEvents(opts, (err, rawStream) => {
     const stream = chain<any[]>([
       rawStream,
       parser()
