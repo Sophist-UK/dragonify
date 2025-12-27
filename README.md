@@ -4,12 +4,35 @@
 which can reconfigure the default Docker networks provided by TrueNAS Scale for apps to allow them to communicate
 with each other.
 
-In its initial form in TrueNAS Scale Electric Eel, the application networking differs substantially from the previous Kubernetes networking architecture (where all apps shared a single container network). iX's initial Docker-apps implementation has only two options for Docker networks:
+***THIS IS A WORK-IN-PROGRESS VERSION OF THE README DESCRIBING A TO-BE VERSION OF DRAGONIFY - WITH THE PURPOSE OF GIVING A VISION AND INVITING INPUT ABOUT THE VISION AND TECHNICAL DETAILS OF IMPLEMENTING IT. YOUR INPUT IS REQUESTED PARTICULARLY:***
 
-1. Default - every app is connected to its own app-specific Docker bridged network with its own private subnet (by default in the 172.*.*.* range)
+* ***WHAT ARCHITECTURES SHOULD BE ADOPTED?***
+* ***HOW SHOULD THE USER CONFIGURE THEM?***
+* ***HOW DO WE GET CONTAINERS TO RECOGNISE NETWORK ATTACHMENTS/DETACHMENTS?***
+* ***HOW CAN WE MINIMISE IMPACTS OF NETWORK ATTACH/DETACH?***
+* ***HOW DO WE SET HOST NAMES AND MAKE SURE DNS WORKS?***
+
+***PLEASE PROVIDE YOUR FEEDBACK TO [SOPHIST@SODALIS.CO.UK](mailto:sophist@sodalis.co.uk).***
+
+## TrueNAS standard Docker networking
+
+In its initial form in TrueNAS Scale Electric Eel, the application networking differs substantially from the previous Kubernetes networking architecture (where all apps shared a single container network and could communicate with one another).
+
+iX's initial Docker-apps implementation has only two options for Docker networks:
+
+1. Default - every app is connected to its own app-specific Docker bridged network with its own private subnet (by default in the 172.*.*.* range). This means that apps cannot communicate with other apps except through published ports.
+
+   *Note:* Complex apps that have multiple containers (e.g. NextCloud) will have all these containers in a single network and thus they can communicate amongst themselves but not with containers in other apps.
+
+   **Note:** It appears likely that this architecture was chosen for two reasons:
+
+      A. The default Docker Bridged network does NOT provide DNS name resolution, whilst explicitly created bridge networks do; and
+      B. Apps in the Apps store are generally stand-alone, and this Docker network model provides the greatest isolation of apps and thus the best security walls between apps.
+
 2. Host Network - although the app has it's app-specific Docker network created, it is ***not*** connected to it and uses the Host IP address(es) instead.
 
-In its initial form, TJ Horner created this utility to replicate the previous Kubernetes network-architecture,
+To allow TrueNAS apps to communicate between themselves, TJ Horner created this utility,
+and in its initial form to replicate the previous Kubernetes network-architecture,
 creating a single shared Docker bridged network and connecting every non-Host-network app to it (CONNECT_ALL).
 To assist further with this Kubernetes simulation, it provided backward-compatibility
 with the old Kubernetes-based apps system for DNS names,
@@ -45,8 +68,9 @@ to run the equivalent of `docker network connect` commands against already runni
    It does ***not*** update the TrueNAS application definitions to make the changes before the container starts.
 
    Because these commands change the container's network configuration at run-time ***after*** it has initialised,
-the container needs to be able to recognise that it's configuration has changed and reconfigure the container
-IP routing tables, and this depends on what base O/S the container has been built upon.
+the container needs to be able to recognise that it's configuration has changed and
+reconfigure the container IP routing tables (and this may depend on what base O/S the container has been built upon) and
+the app itself may need an ability to recognise and handle post-initialisation network changes.
 
 ## Change Log
 
@@ -57,7 +81,7 @@ IP routing tables, and this depends on what base O/S the container has been buil
 | EngTurtle | v0.3 | ghcr.io/EngTurtle/dragonify:main | Handle errors resulting from 2 or more parallel requests to create a new network (for e.g. multiple containers starting simultaneously in e.g. NextCloud), switch from pnpm to npm to avoid needing network connection (potential security issue),
 | Sophist-UK | v0.4alpha | ghcr.io/Sophist-UK/dragonify:main | As above plus refactored code, supports additional Docker network approaches, improved logging, more efficient container start/stop event handling, handle Dragonify terminate signal, track networks and connected containers to avoid unnecessary Docker calls, add github actions for linting and TypeScript code quality analysis
 
-**Note:** This table will be updated as v0.4 progresses and when image locations above are change when PRs are merged.
+**Note:** This table will be updated as v0.4 progresses and when image locations above are changed if/when PRs are merged.
 
 ## Docker Network approaches
 
@@ -117,14 +141,15 @@ but no network changes will be made regardless.)
 ![Dragonify CONNECT_ALL](.github/assets/dragonify-connect-all-network.png)
 
 This diagram shows how both earlier versions of TrueNAS that used Kubernetes
-mapped apps (except Host Network apps)to Docker Networks,
+mapped apps to Docker Networks (except Host Network apps),
 and how the original Dragonify version mapped networks in later versions of TrueNAS that use Docker.
 
 If you ***don't*** specify `CONNECT_ALL = "false"` as a Dragonify environment variable,
-then (for backwards compatibility purposes) Dragonify will continue to
-connect all containers to a single common Docker bridged network (`apps-internal`).
+then (for backwards compatibility purposes) all later versions of Dragonify
+will continue to connect all containers to a single common Docker bridged network (`apps-internal`).
 
-However this is a one-option approach, and @Casse-Boubou extended the functionality so that:
+However this original implementation is a one-option approach,
+and to provide greater flexibility @Casse-Boubou extended the functionality so that:
 * if you specify an environment variable `CONNECT_ALL = "false"`, then
 * for each container, you can define using a Docker Label (`tj.horner.dragonify.networks`)
 the alternative network(s) you want Dragonify to connect the container to
@@ -134,13 +159,27 @@ leaving it on the default application-specific bridged network.
 By configuring it this way, instead of a single `apps-internal` bridged network,
 you can now have several shared bridged networks for different groups of applications.
 
-### Dragonify Front-end + Isolated Back-end
+![Dragonify Dual Shared Networks](.github/assets/dragonify-dual-shared-networks.png)
+
+### Dragonify Front-end + Isolated Back-ends
 
 ![Dragonify Front-end + Isolated Back-end](.github/assets/dragonify-isolated-backend-network.png)
 
 ### Dragonify Front-end + Accessible Back-end
 
 ![Dragonify Front-end + Accessible Back-end](.github/assets/dragonify-non-isolated-backend.png)
+
+### Dragonify Container Attachment
+
+![Dragonify Container Attached Network](.github/assets/dragonify-container-attached-network.png)
+
+This networking approach is being described as a ***possible*** future enhancement
+because it has some restrictions and difficulties.
+Whilst it potentially might provide some capabilities
+not achievable through any of the previous approaches,
+attaching `app-2` to the `container:app-1` requires `app-1` to be running.
+It is also unclear what happens to `app-2` if `app-1` stops running,
+since `app-2` seems to rely on `app-1`'s iptables for packets to be forwarded to `app-2`.
 
 ### Dragonify Completely Isolated Container
 
